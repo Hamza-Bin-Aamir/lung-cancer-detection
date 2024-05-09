@@ -8,8 +8,11 @@ GaussianKernel = (3, 3)
 GaussianSigma = 6
 ImageResolution = (256, 256)
 ImageSetSize = 100
-NumPatients = 6
+NumPatients = 200
 DatasetLoc = "./LIDC-IDRI"
+Epochs = 20
+Train_Ratio = 0.8
+Save_Model = True
 
 # MARK: Import Libraries
 # Try to import all the core libraries
@@ -22,8 +25,11 @@ try:
 	import torch.optim as Optimiser
 	from torch.utils.data import Dataset
 	import pydicom as PyDICOM
+	from typing import Tuple
 	import random
+	import datetime
 	import os
+	import time
 
 	print("******************** All core libraries imported successfully ********************")
 	print(f"NumPy Version: {NumPy.__version__}")
@@ -45,18 +51,58 @@ except:
 	exit(-1)
 
 # We are not using matplotlib for now, we might use it for model performance later
-# PlottingAvailable = True
-# try:
-# 	from matplotlib import pyplot as PyPlot
-# except ImportError:
-# 	print("Failed to import library: matplotlib, Plotting will be disabled")
-# 	PlottingAvailable = False
-# except:
-# 	print("General error while importing matplotlib, Plotting will be disabled")
-# 	PlottingAvailable = False
+PlottingAvailable = True
+try:
+	from matplotlib import pyplot as PyPlot
+except ImportError:
+	print("Failed to import library: matplotlib, Plotting will be disabled")
+	PlottingAvailable = False
+except:
+	print("General error while importing matplotlib, Plotting will be disabled")
+	PlottingAvailable = False
 
-# MARK: Custom functions
+# MARK: Data Acq Funcs
 # Original by Esa Anjum (https://stackoverflow.com/a/74886257), Modified for our use case
+def LoadPatientAndDiagnosis(DatasetLoc: str, NumPatients: int) -> Tuple[Pandas.Series, list[list[str]]]:
+	"""
+		AUTHOR: 	Azeem Liaqat
+		DATE: 		5 May 2024
+		CATEGORY:	Image Acquisition
+
+		Loads all filenames from the DataSetLoc directory
+		Loads all diagnoses from the tcia-diagnosis-data-2012-04-20.xls file
+	"""
+	patient_list = ["LIDC-IDRI-" + f"{i:04}" for i in range(1, NumPatients + 1)]
+	diagnoses = Pandas.read_excel('./LIDC-META/tcia-diagnosis-data-2012-04-20.xls')
+	complete_diagnoses = []
+	for patient in patient_list:
+		try:
+			complete_diagnoses.append(diagnoses['Diagnosis'][
+				(diagnoses['Patient ID'])
+				[
+					diagnoses['Patient ID'] == patient
+				].index[0]
+				])
+		except:
+			complete_diagnoses.append(0)
+
+	complete_diagnoses = Pandas.Series(complete_diagnoses)
+
+	# add directories to all files in a 'files' list
+	patients = []
+	for item in sorted(os.listdir(DatasetLoc)):  # Sort patient folders alphabetically
+		item_path = os.path.join(DatasetLoc, item)
+		if os.path.isdir(item_path):
+			patient_files = []
+			for dirpath, _, filenames in os.walk(item_path):  # Efficiently traverse folders
+				for filename in filenames:
+					if not filename.endswith(".xml"):
+						filepath = os.path.join(dirpath, filename)
+						patient_files.append(filepath)
+			patients.append(patient_files)
+
+	return complete_diagnoses, patients
+
 def dicom_to_numpy(ds: PyDICOM.FileDataset, Show:bool = False) -> OpenCV.Mat:
 		"""
 		AUTHOR: 	Azeem Liaqat
@@ -92,6 +138,30 @@ def dicom_to_numpy(ds: PyDICOM.FileDataset, Show:bool = False) -> OpenCV.Mat:
 			print(f"An error occurred while converting DICOM to Numpy {E.__cause__}")
 			raise ValueError("An error occurred while converting DICOM to Numpy")
 
+def train_test_split(data, labels, test_size=0.2):
+	"""
+	AUTHOR: 	Ahmed Abdullah
+	DATE: 		5 May 2024
+	CATEGORY:	Data Acquisition
+
+	Splits data and labels into training and testing sets manually.
+	"""
+	data_length = len(data)
+	test_index = int(data_length * test_size)
+
+	# Shuffle data and labels together for balanced split
+	combined = list(zip(data, labels))
+	random.shuffle(combined)
+	data, labels = zip(*combined)
+	print(f"Data before splitting: {len(data)}")
+	print(f"Labels before splitting: {len(labels)}")
+
+	X_train = data[:test_index]
+	X_test = data[test_index:]
+	y_train = labels[:test_index]
+	y_test = labels[test_index:]
+
+	return X_train, X_test, y_train, y_test
 
 def LoadImage(Location: str, Show:bool = False) -> OpenCV.Mat:
 	"""
@@ -117,6 +187,8 @@ def LoadImage(Location: str, Show:bool = False) -> OpenCV.Mat:
 
 	return Image
 
+# MARK: Image Proc Funcs
+
 def ImageProcessingStack(image: OpenCV.Mat) -> None:
 	"""
 	AUTHOR: 	Muhammad Aoun Abdullah
@@ -131,28 +203,7 @@ def ImageProcessingStack(image: OpenCV.Mat) -> None:
 	OpenCV.normalize(image, image, HistogramAlphaScaling)
 	image = OpenCV.GaussianBlur(image, GaussianKernel, GaussianSigma)
 
-def train_test_split(data, labels, test_size=0.2):
-	"""
-	AUTHOR: 	Ahmed Abdullah
-	DATE: 		5 May 2024
-	CATEGORY:	Data Acquisition
-
-	Splits data and labels into training and testing sets manually.
-	"""
-	data_length = len(data)
-	test_index = int(data_length * test_size)
-
-	# Shuffle data and labels together for balanced split
-	combined = list(zip(data, labels))
-	random.shuffle(combined)
-	data, labels = zip(*combined)
-
-	X_train = data[:test_index]
-	X_test = data[test_index:]
-	y_train = labels[:test_index]
-	y_test = labels[test_index:]
-
-	return X_train, X_test, y_train, y_test
+# MARK: 
 
 # MARK: Neural Net Classes
 # Heavily inspired by the guide published by PyTorch (https://pytorch.org/tutorials/beginner/data_loading_tutorial.html)
@@ -179,7 +230,7 @@ class CTScanDataset(Dataset):
 			elif len(images[i]) < ImageSetSize:
 				# We will duplicate the last image if image set is too small
 				images[i].extend(	[images[i][-1]] 		* (ImageSetSize - len(images[i])))
-				print("Warning: Images for a patient have been *duplicated* to normalize the dataset")
+				print("WARNING: Images for a patient have been *duplicated* to normalize the dataset")
 				FinalImages.append(images[i])
 				FinalDiagnoses.append(diagnoses[i])
 			elif len(images[i]) > ImageSetSize:
@@ -194,16 +245,14 @@ class CTScanDataset(Dataset):
 						FinalDiagnoses.append(diagnoses[i])
 						curr_img = []
 						curr_idx = 0
+				print("WARNING: Images for a patient have been *split* to normalize the dataset") 
 				if curr_idx != 0:
 					# If we have some images left, we will duplicate the last image
 					curr_img.extend([curr_img[-1]] * (ImageSetSize - len(curr_img)))
 					FinalImages.append(curr_img)
 					FinalDiagnoses.append(diagnoses[i])
-				print("Warning: Images for a patient have been *split* to normalize the dataset") 
+					print("WARNING: Images for a patient have been *duplicated* (after a split) to normalize the dataset") 
 		
-		print("Dataset Created Successfully")
-		print(f"Shape of Final Images: {NumPy.array(FinalImages).shape}")
-		print(f"Length of Final Diagnoses: {len(FinalDiagnoses)}")
 		self.diagnoses 	= 	FinalDiagnoses
 		self.images 	= 	FinalImages
 
@@ -235,6 +284,8 @@ class CTScanDataset(Dataset):
 			Tensor = PyTorch.from_numpy(Float)
 
 			ImageSet.append(Tensor)
+		
+		ImageSet = PyTorch.cat(ImageSet, 0).reshape(ImageSetSize, ImageResolution[0], ImageResolution[1])
 
 		RetData["diagnosis"] = self.diagnoses[idx]
 		RetData["images"] = ImageSet
@@ -314,6 +365,7 @@ class TemporalVGG16(NeuralNet.Module):
 
 		# Define the fully connected layers
 		self.avgpool = NeuralNet.AdaptiveAvgPool2d((7, 7))
+		self.fc = NeuralNet.Linear(in_features=512 * 7 * 7, out_features=num_classes)
 
 	def forward(self, x):
 		# Pass the input through the convolutional blocks
@@ -334,35 +386,98 @@ class TemporalVGG16(NeuralNet.Module):
 
 # MARK: Entry Point
 if __name__ == "__main__":
-	patient_list = ["LIDC-IDRI-" + f"{i:04}" for i in range(1, NumPatients + 1)]
-	diagnoses = Pandas.read_excel('./LIDC-META/tcia-diagnosis-data-2012-04-20.xls')
-	complete_diagnoses = []
-	for patient in patient_list:
-		try:
-			complete_diagnoses.append(diagnoses['Diagnosis'][
-				(diagnoses['Patient ID'])
-				[
-					diagnoses['Patient ID'] == patient
-				].index[0]
-				])
-		except:
-			complete_diagnoses.append(0)
-
-	complete_diagnoses = Pandas.Series(complete_diagnoses)
-
-	# add directories to all files in a 'files' list
-	patients = []
-	for item in sorted(os.listdir(DatasetLoc)):  # Sort patient folders alphabetically
-		item_path = os.path.join(DatasetLoc, item)
-		if os.path.isdir(item_path):
-			patient_files = []
-			for dirpath, _, filenames in os.walk(item_path):  # Efficiently traverse folders
-				for filename in filenames:
-					if not filename.endswith(".xml"):
-						filepath = os.path.join(dirpath, filename)
-						patient_files.append(filepath)
-			patients.append(patient_files)	
-	 
+	# Load the dataset
+	diagnoses, patients = LoadPatientAndDiagnosis(DatasetLoc, NumPatients) 
 	print("******************** Dataset loaded successfully ********************")
 	print(f"Patient Image Locations: \n{Pandas.Series(patients)} Patients: {len(patients)}")
-	print(f"Diagnoses: \n{complete_diagnoses} Patients: {len(complete_diagnoses)}")
+	print(f"Diagnoses: \n{diagnoses} Patients: {len(diagnoses)}")
+
+	# Split the dataset into training and testing sets
+	X_train, X_test, y_train, y_test = train_test_split(patients, diagnoses, Train_Ratio)
+	print("******************** Dataset split successfully ********************")
+	print(f"X_train: {len(X_train)} \nX_test: {len(X_test)} \ny_train: {len(y_train)} \ny_test: {len(y_test)}")
+
+	# Create the dataset
+	train_dataset = CTScanDataset(y_train, X_train)
+	test_dataset = CTScanDataset(y_test, X_test)
+	print("******************** Dataset converted to PyTorch compatible successfully ********************")
+	print("Length of Train Dataset:", len(train_dataset))
+	print("Length of Test Dataset:", len(test_dataset))
+
+	# Create the dataloaders
+	train_loader = 	PyTorch.utils.data.DataLoader(train_dataset, batch_size=1, shuffle=True)
+	test_loader = 	PyTorch.utils.data.DataLoader(test_dataset,	 batch_size=1, shuffle=False)
+
+	# Create the model
+	model = TemporalVGG16()
+	print("******************** Model created successfully ********************")
+	print("Model Type:", model._get_name())
+
+	# Define the loss function and optimizer
+	criterion = NeuralNet.L1Loss()
+	optimizer = Optimiser.Adam(model.parameters(), lr=0.01)
+	print("******************** Unsupervised Learning Trainer Created ********************")
+	print(f"Criterea:{criterion} (AKA Mean Absolute Error) \nOptimizer: {optimizer} \nEpochs: {Epochs} \nBatch Size: 1 \nShuffle: True")
+
+	# Training loop
+	curr_index = 0
+	epoch_losses = []
+	epoch_indices = []
+	test_losses = []
+
+	for epoch in range(Epochs):
+		print(f"Epoch Number: {curr_index}")
+		curr_index += 1
+		epoch_loss = 0.0
+
+
+		for batch in train_loader:
+			# Get the inputs and labels from the batch
+			inputs, labels = batch['images'], batch['diagnosis']
+
+			# Zero the gradients
+			optimizer.zero_grad()
+			
+			# Forward pass
+			outputs = model(inputs)
+			
+			# Compute the loss
+			loss = criterion(outputs, labels)
+			
+			# Backward pass
+			loss.backward()
+			
+			# Update the weights
+			optimizer.step()
+
+			epoch_loss += outputs.shape[0] * loss.item()
+		epoch_losses.append(epoch_loss / len(train_dataset))
+		epoch_indices.append(curr_index)
+
+		test_loss = 0.0
+		for batch in test_loader:
+			inputs, labels = batch['images'], batch['diagnosis']
+
+			outputs = model(inputs)
+
+			loss = criterion(outputs, labels)
+			test_loss += outputs.shape[0] * loss.item()
+		test_losses.append(test_loss / len(test_dataset))
+	print("******************** Model Training Completed ********************")
+
+	if Save_Model:
+		now = datetime.datetime.now()
+		PyTorch.save(model.state_dict(), f"{now.strftime("%Y%m%d %H%M%S")}.pt")
+		print("******************** Model Saved ********************")
+
+	epoch_losses 	= [100 - element for element in epoch_losses]
+	test_losses 	= [100 - element for element in test_losses]
+	PyPlot.title("Model Accuracy in Training and Testing")
+	PyPlot.plot(epoch_indices, epoch_losses, marker='x', color='red', linestyle='--')
+	PyPlot.plot(epoch_indices, test_losses, marker='x', color='blue', linestyle='-')
+	PyPlot.xlabel("Epoch")
+	PyPlot.ylabel("Accuracy")
+	PyPlot.legend(['Training Accuracy (%)', 'Testing Accuracy (%)'])
+	PyPlot.grid(True)
+	PyPlot.show()
+
