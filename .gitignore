@@ -161,3 +161,6 @@ cython_debug/
 
 LIDC-IDRI/
 LIDC-META/
+
+#Trained models
+*.pt

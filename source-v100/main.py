@@ -101,7 +101,6 @@ def LoadImage(Location:os.path, Show:bool = False) -> OpenCV.Mat:
 # ## Implementation 
 
 # %%
-data = Pandas.DataFrame()
 number_of_patients = 6  # Adjust this to the desired number of IDs
 patient_list = ["LIDC-IDRI-" + f"{i:04}" for i in range(1, number_of_patients + 1)]
 diagnoses = Pandas.read_excel('./LIDC-META/tcia-diagnosis-data-2012-04-20.xls')
