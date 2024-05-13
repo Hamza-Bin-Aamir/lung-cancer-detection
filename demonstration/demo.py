@@ -6,6 +6,10 @@ print("------------------------ WELCOME TO THE MGS DEMO ------------------------
 #----------------------------------------------------------------------------------------
 print("*** Importing libraries ***")
 try:
+	import torch as PyTorch
+	import torch.nn as NeuralNet
+	import matplotlib.pyplot as plt
+	from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 	import mgs # this is where our user-defined funcs and classes live
 	print(f"SUCCESS: Imported MGS version: {mgs.__version__}")
 	
@@ -44,7 +48,6 @@ config["settings"] 	= settings
 #----------------------------------------------------------------------------------------
 print("*** Loading model ***")
 model			= mgs.LoadModel(config["files"]["ModelLocation"])
-print(model)
 
 print("SUCCESS: Model Loaded")
 
@@ -56,5 +59,20 @@ PatientNames 	= mgs.getSubDirs("./LIDC-IDRI")
 Diagnoses 		= mgs.LoadDiagnoses("./LIDC-META/diagnoses.xls", PatientNames)
 Images			= []
 for Patient in PatientNames:
-	PatientNames.append(mgs.getSubFiles(Patient, ".dcm"))
-print(PatientNames[0][0], PatientNames[1][0])
+	Images.append(mgs.getSubFiles(".\\LIDC-IDRI\\" + Patient, ".dcm"))
+
+ValidationDataset = mgs.CTScanDataset(Diagnoses, Images)
+ValidationLoader  = PyTorch.utils.data.DataLoader(ValidationDataset, batch_size=1, shuffle=True)
+
+criterion = NeuralNet.L1Loss()
+cumulativeLoss = 0.0 
+
+for batch in ValidationLoader:
+	inputs, labels = batch['images'], batch['diagnosis']
+	
+	outputs = model(inputs)
+
+	cumulativeLoss += criterion(outputs, labels)
+	cumulativeLoss = outputs.shape[0] * cumulativeLoss.item()
+
+print("Cumulative Loss: " + str(cumulativeLoss))

@@ -430,7 +430,6 @@ if __name__ == "__main__":
 		curr_index += 1
 		epoch_loss = 0.0
 
-
 		for batch in train_loader:
 			# Get the inputs and labels from the batch
 			inputs, labels = batch['images'], batch['diagnosis']
@@ -480,4 +479,3 @@ if __name__ == "__main__":
 	PyPlot.legend(['Training Accuracy (%)', 'Testing Accuracy (%)'])
 	PyPlot.grid(True)
 	PyPlot.show()
-

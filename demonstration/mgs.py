@@ -1,5 +1,15 @@
 __version__ = "2.0.0-alpha"
 ImageSetSize = 100
+HistogramAlphaScaling = 1000
+GaussianKernel = (3, 3)
+GaussianSigma = 6
+ImageResolution = (256, 256)
+ImageSetSize = 100
+NumPatients = 200
+DatasetLoc = "./LIDC-IDRI"
+Epochs = 20
+Train_Ratio = 0.8
+Save_Model = True
 
 try:
 	import numpy as NumPy
@@ -338,24 +348,34 @@ def LoadDiagnoses(Location:str, Queries:list[str]) -> Pandas.Series:
 def getSubDirs(Location:str):
 	return [d for d in os.listdir(os.path.join(os.path.dirname(__file__), Location)) if os.path.isdir(os.path.join(os.path.join(os.path.dirname(__file__), Location), d))]
 
-search_depth = 2
 def getSubFiles(Location: str, ext: str):
-  all_files = []
-  if search_depth != 1:  # Handle invalid or search_depth of 1
-    return all_files
+	Subdirs = getSubDirs(Location)
+	Subsubdirs = []
+	final_dirs = []
+	image_locs = []
+	for Subsubdir in Subdirs:
+		Subsubdirs.append(getSubDirs(Location + "\\" + Subsubdir))
+	for Subsubsubdir in os.listdir(os.path.join(os.path.dirname(__file__), os.path.join(Location, Subsubdir))):
+		final_dirs.append(getSubDirs(Location + "\\" + Subsubdir + "\\" + Subsubsubdir))
+	for image_location in os.listdir(os.path.join(os.path.dirname(__file__), os.path.join(Location, os.path.join(Subsubdir, Subsubsubdir)))):
+		if(image_location.endswith(".dcm")):
+			image_locs.append(os.path.join(os.path.dirname(__file__), os.path.join(Location, os.path.join(Subsubdir, os.path.join(Subsubsubdir, image_location)))))
 
-  try:
-    # Get immediate subdirectory entries (assuming search_depth is 2)
-    for entry in os.listdir(Location):
-      full_path = os.path.join(Location, entry)
-      # Check if entry is a directory (not a file)
-      if os.path.isdir(full_path):
-        # Check files within the subdirectory (immediate level only)
-        for sub_file in os.listdir(full_path):
-          if sub_file.endswith(ext):
-            all_files.append(os.path.join(full_path, sub_file))
-  except FileNotFoundError:
-    # Handle potential errors if the directory doesn't exist
-    pass
+	return image_locs
 
-  return all_files
+
+def convert_outputs_to_labels(outputs, threshold:float=1):
+	"""
+	Converts model outputs to predicted labels for binary classification with a threshold.
+
+	Args:
+		outputs: A tensor of model outputs with shape (batch_size,).
+		threshold: The threshold value for classifying outputs as 0 or 1 (default: 0.5).
+
+	Returns:
+		A list of predicted labels (integers) for each sample in the batch.
+	"""
+
+	# Apply threshold to get binary labels (0 or 1)
+	predicted_labels = (outputs > threshold).float().tolist()  # Convert to float for list conversion
+	return predicted_labels
