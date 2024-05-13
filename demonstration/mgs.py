@@ -1,4 +1,5 @@
 __version__ = "2.0.0-alpha"
+ImageSetSize = 100
 
 try:
 	import numpy as NumPy
@@ -9,6 +10,8 @@ try:
 	import torch.optim as Optimiser
 	from torch.utils.data import Dataset
 	import pydicom as PyDICOM
+	from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+	import os
 
 	print("******************** All core libraries imported successfully ********************")
 	print(f"NumPy Version: {NumPy.__version__}")
@@ -31,29 +34,6 @@ except:
 	exit(-1)
 
 # MARK: User-Defined Functions
-
-def loadDefault(config:str):
-	"""
-		Modifies the value "in-place"
-	"""
-	# Tells the interpreter that config, files, and settings are dictionaries
-	config = {}
-	files = {}
-	settings = {}
-
-	# fill in file values
-	files["DatasetLoc"]					= "./Dataset"
-	files["ModelLocation"]				= "./Models/best.pt"
-
-	# fill in setting values
-	settings["HistogramAlphaScaling"] 	= 1000
-	settings["GaussianKernel"]			= (3,3)
-	settings["GaussianSigma"]			= 6
-	settings["ImageResolution"]			= (1024, 1024)
-	settings["ImageSetSize"]			= 100
-
-	config["files"] 	= files
-	config["settings"] 	= settings
 
 
 def dicom_to_numpy(ds: PyDICOM.FileDataset, Show:bool = False) -> OpenCV.Mat:
@@ -128,6 +108,11 @@ def ImageProcessingStack(image: OpenCV.Mat) -> None:
 
 	OpenCV.normalize(image, image, HistogramAlphaScaling)
 	image = OpenCV.GaussianBlur(image, GaussianKernel, GaussianSigma)
+
+def PlotConfusion(real, expected) -> None:
+	cm = confusion_matrix(real, expected)
+	ConfusionMatrixDisplay(cm).plot()
+
 
 # MARK: User-Defined Classes
 class CTScanDataset(Dataset):
@@ -306,3 +291,21 @@ class TemporalVGG16(NeuralNet.Module):
 		# This example assumes the final layer has num_classes output neurons
 		x = self.fc(x)
 		return x
+
+# MARK: UD Funcs Cont.
+def LoadModel(Location:str):
+	# Get the script directory (where your script is located)
+	script_dir = os.path.dirname(__file__)
+
+	# Join the script directory with the relative location provided
+	model_path = os.path.join(script_dir, Location)
+	try:
+		model = TemporalVGG16()
+		state_dict = PyTorch.load(model_path)
+		model.load_state_dict(state_dict)
+		return model
+	except FileNotFoundError:
+		print(f"Error: Model file not found at {Location}")
+	except RuntimeError as e:
+		print(f"Error loading model: {e}")
+	raise FileNotFoundError()

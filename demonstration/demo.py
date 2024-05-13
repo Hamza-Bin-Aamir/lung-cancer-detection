@@ -20,21 +20,32 @@ except:
 # MARK: Load config 
 #----------------------------------------------------------------------------------------
 print("*** Loading Configuration Variables ***")
-config = None
 
-# try to load from file, otherwise use default values
-try:
-	import configparser
-	config = configparser.ConfigParser()
-	config.read("config.ini")
-	assert config['files'] is not None
+config = {}
+files = {}
+settings = {}
 
-except ImportError as E:
-	print("WARNING: UNABLE TO FIND \"configparser\" MODULE, USING DEFAULT VALUES")
-	mgs.loadDefault(config)
-except Exception as E:
-	print("WARNING: UNABLE TO READ CONFIG FILE, USING DEFAULT VALUES")
-	mgs.loadDefault(config)
-finally:
-	print("SUCCESS: Configuration file (\"config.ini\") or default values loaded")
+# fill in file values
+files["DatasetLoc"]					= "./Dataset"
+files["ModelLocation"]				= "./Models/best.pt"
 
+# fill in setting values
+settings["HistogramAlphaScaling"] 	= 1000
+settings["GaussianKernel"]			= 3
+settings["GaussianSigma"]			= 6
+settings["ImageResolution"]			= 1024
+settings["ImageSetSize"]			= mgs.ImageSetSize
+
+config["files"] 	= files
+config["settings"] 	= settings
+
+#----------------------------------------------------------------------------------------
+# MARK: Load model
+#----------------------------------------------------------------------------------------
+
+model			= mgs.LoadModel(config["files"]["ModelLocation"])
+print(model)
+
+print("SUCCESS: Model Loaded")
+
+#
