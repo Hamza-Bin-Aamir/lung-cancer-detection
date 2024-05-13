@@ -42,10 +42,19 @@ config["settings"] 	= settings
 #----------------------------------------------------------------------------------------
 # MARK: Load model
 #----------------------------------------------------------------------------------------
-
+print("*** Loading model ***")
 model			= mgs.LoadModel(config["files"]["ModelLocation"])
 print(model)
 
 print("SUCCESS: Model Loaded")
 
-#
+#----------------------------------------------------------------------------------------
+# MARK: Load dataset
+#----------------------------------------------------------------------------------------
+print("*** Loading dataset ***")
+PatientNames 	= mgs.getSubDirs("./LIDC-IDRI")
+Diagnoses 		= mgs.LoadDiagnoses("./LIDC-META/diagnoses.xls", PatientNames)
+Images			= []
+for Patient in PatientNames:
+	PatientNames.append(mgs.getSubFiles(Patient, ".dcm"))
+print(PatientNames[0][0], PatientNames[1][0])

@@ -12,6 +12,8 @@ try:
 	import pydicom as PyDICOM
 	from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 	import os
+	import glob
+	import xlrd
 
 	print("******************** All core libraries imported successfully ********************")
 	print(f"NumPy Version: {NumPy.__version__}")
@@ -19,6 +21,7 @@ try:
 	print(f"Pandas Version: {Pandas.__version__}")
 	print(f"PyTorch Version: {PyTorch.__version__}")
 	print(f"PyDICOM Version: {PyDICOM.__version__}")
+	print(f"XLRD version: {xlrd.__version__}")
 	print("----------------------------------------")
 	print(f"CUDA Available: {PyTorch.cuda.is_available()}")
 	print("Please verify that CUDA is available, otherwise the training will be done on CPU (extremely slow)")
@@ -309,3 +312,50 @@ def LoadModel(Location:str):
 	except RuntimeError as e:
 		print(f"Error loading model: {e}")
 	raise FileNotFoundError()
+
+def LoadDiagnoses(Location:str, Queries:list[str]) -> Pandas.Series:
+	# Get the script directory (where your script is located)
+	script_dir 		= os.path.dirname(__file__)
+
+	# Join the script directory with the relative location provided
+	diagnoses_path 	= os.path.join(script_dir, Location)
+	diagnoses_file	= Pandas.read_excel(diagnoses_path)
+	PateintsCol		= "ID"
+	DiagnosesCol	= "Diagnosis"	
+	Responses 		= []
+
+	for query in Queries:
+		MatchedDataframe = diagnoses_file.loc[diagnoses_file[PateintsCol] == query]
+		matched_values = MatchedDataframe[DiagnosesCol] 
+		try:
+			Responses.append(matched_values.iloc[0])
+		except:
+			Responses.append(0)
+
+
+	return Responses
+
+def getSubDirs(Location:str):
+	return [d for d in os.listdir(os.path.join(os.path.dirname(__file__), Location)) if os.path.isdir(os.path.join(os.path.join(os.path.dirname(__file__), Location), d))]
+
+search_depth = 2
+def getSubFiles(Location: str, ext: str):
+  all_files = []
+  if search_depth != 1:  # Handle invalid or search_depth of 1
+    return all_files
+
+  try:
+    # Get immediate subdirectory entries (assuming search_depth is 2)
+    for entry in os.listdir(Location):
+      full_path = os.path.join(Location, entry)
+      # Check if entry is a directory (not a file)
+      if os.path.isdir(full_path):
+        # Check files within the subdirectory (immediate level only)
+        for sub_file in os.listdir(full_path):
+          if sub_file.endswith(ext):
+            all_files.append(os.path.join(full_path, sub_file))
+  except FileNotFoundError:
+    # Handle potential errors if the directory doesn't exist
+    pass
+
+  return all_files
