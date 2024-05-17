@@ -1,8 +1,5 @@
-# Project MGS v2.0.0-beta
-# Refactored to deal with major logical issues and bugs with the first version
-
-# MARK: Global Parameters
-# TODO: Use a config file
+__version__ = "2.0.0-alpha"
+ImageSetSize = 100
 HistogramAlphaScaling = 1000
 GaussianKernel = (3, 3)
 GaussianSigma = 6
@@ -14,8 +11,6 @@ Epochs = 20
 Train_Ratio = 0.8
 Save_Model = True
 
-# MARK: Import Libraries
-# Try to import all the core libraries
 try:
 	import numpy as NumPy
 	import cv2 as OpenCV
@@ -25,11 +20,10 @@ try:
 	import torch.optim as Optimiser
 	from torch.utils.data import Dataset
 	import pydicom as PyDICOM
-	from typing import Tuple
-	import random
-	import datetime
+	from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 	import os
-	import time
+	import glob
+	import xlrd
 
 	print("******************** All core libraries imported successfully ********************")
 	print(f"NumPy Version: {NumPy.__version__}")
@@ -37,11 +31,13 @@ try:
 	print(f"Pandas Version: {Pandas.__version__}")
 	print(f"PyTorch Version: {PyTorch.__version__}")
 	print(f"PyDICOM Version: {PyDICOM.__version__}")
+	print(f"XLRD version: {xlrd.__version__}")
 	print("----------------------------------------")
 	print(f"CUDA Available: {PyTorch.cuda.is_available()}")
 	print("Please verify that CUDA is available, otherwise the training will be done on CPU (extremely slow)")
 	print("If CUDA Available is False, it is most likely an issue with your installation of PyTorch")
 	print("----------------------------------------")
+
 
 except ImportError as E:
 	print(f"Failed to import library: {E.name}, Since it is a core library, the program is exiting")
@@ -50,119 +46,44 @@ except:
 	print("General error while importing core libraries, the program is exiting")
 	exit(-1)
 
-# We are not using matplotlib for now, we might use it for model performance later
-PlottingAvailable = True
-try:
-	from matplotlib import pyplot as PyPlot
-except ImportError:
-	print("Failed to import library: matplotlib, Plotting will be disabled")
-	PlottingAvailable = False
-except:
-	print("General error while importing matplotlib, Plotting will be disabled")
-	PlottingAvailable = False
+# MARK: User-Defined Functions
 
-# MARK: Data Acq Funcs
-# Original by Esa Anjum (https://stackoverflow.com/a/74886257), Modified for our use case
-def LoadPatientAndDiagnosis(DatasetLoc: str, NumPatients: int) -> Tuple[Pandas.Series, list[list[str]]]:
-	"""
-		AUTHOR: 	Azeem Liaqat
-		DATE: 		5 May 2024
-		CATEGORY:	Image Acquisition
-
-		Loads all filenames from the DataSetLoc directory
-		Loads all diagnoses from the tcia-diagnosis-data-2012-04-20.xls file
-	"""
-	patient_list = ["LIDC-IDRI-" + f"{i:04}" for i in range(1, NumPatients + 1)]
-	diagnoses = Pandas.read_excel('./LIDC-META/tcia-diagnosis-data-2012-04-20.xls')
-	complete_diagnoses = []
-	for patient in patient_list:
-		try:
-			complete_diagnoses.append(diagnoses['Diagnosis'][
-				(diagnoses['Patient ID'])
-				[
-					diagnoses['Patient ID'] == patient
-				].index[0]
-				])
-		except:
-			complete_diagnoses.append(0)
-
-	complete_diagnoses = Pandas.Series(complete_diagnoses)
-
-	# add directories to all files in a 'files' list
-	patients = []
-	for item in sorted(os.listdir(DatasetLoc)):  # Sort patient folders alphabetically
-		item_path = os.path.join(DatasetLoc, item)
-		if os.path.isdir(item_path):
-			patient_files = []
-			for dirpath, _, filenames in os.walk(item_path):  # Efficiently traverse folders
-				for filename in filenames:
-					if not filename.endswith(".xml"):
-						filepath = os.path.join(dirpath, filename)
-						patient_files.append(filepath)
-			patients.append(patient_files)
-
-	return complete_diagnoses, patients
 
 def dicom_to_numpy(ds: PyDICOM.FileDataset, Show:bool = False) -> OpenCV.Mat:
-		"""
-		AUTHOR: 	Azeem Liaqat
-		CITATION:	Esa Anjum (Stack Overflow)
-		DATE: 		5 May 2024
-		CATEGORY:	Image Acquisition
-
-		DICOM files contain several tags as well as image data, in this function,
-		we extract the pixels and convert it to a numpy array (OpenCV Matrix).
-
-		However, the DICOM format stores the pixel intensity data as well as "rescaling data" that 
-		helps us achieve the correct data representation.
-
-		Esa Anjum's original formula did not consider these slope intercepts, so we decided to add them
-		to our codebase to achieve better image quality. A before and after is attached in the wiki.  
-		"""
-		# TODO: Add before after to wiki
-		try:
-			DCM_Img = ds
-			image_data = DCM_Img.pixel_array
-			# Get slope and intercept values (assuming they exist in the DICOM data)
-			slope = DCM_Img.RescaleSlope if hasattr(DCM_Img, 'RescaleSlope') else 1.0
-			intercept = DCM_Img.RescaleIntercept if hasattr(DCM_Img, 'RescaleIntercept') else 0.0
-			
-			scaled_image = image_data * slope + intercept
-			if Show:
-				OpenCV.imshow("Image", scaled_image)
-				OpenCV.waitKey(0)
-
-			return OpenCV.Mat(scaled_image)
-		
-		except Exception as E:
-			print(f"An error occurred while converting DICOM to Numpy {E.__cause__}")
-			raise ValueError("An error occurred while converting DICOM to Numpy")
-
-def train_test_split(data, labels, test_size=0.2):
 	"""
-	AUTHOR: 	Ahmed Abdullah
+	AUTHOR: 	Azeem Liaqat
+	CITATION:	Esa Anjum (Stack Overflow)
 	DATE: 		5 May 2024
-	CATEGORY:	Data Acquisition
+	CATEGORY:	Image Acquisition
 
-	Splits data and labels into training and testing sets manually.
+	DICOM files contain several tags as well as image data, in this function,
+	we extract the pixels and convert it to a numpy array (OpenCV Matrix).
+
+	However, the DICOM format stores the pixel intensity data as well as "rescaling data" that 
+	helps us achieve the correct data representation.
+
+	Esa Anjum's original formula did not consider these slope intercepts, so we decided to add them
+	to our codebase to achieve better image quality. A before and after is attached in the wiki.  
 	"""
-	data_length = len(data)
-	test_index = int(data_length * test_size)
+	# TODO: Add before after to wiki
+	try:
+		DCM_Img = ds
+		image_data = DCM_Img.pixel_array
+		# Get slope and intercept values (assuming they exist in the DICOM data)
+		slope = DCM_Img.RescaleSlope if hasattr(DCM_Img, 'RescaleSlope') else 1.0
+		intercept = DCM_Img.RescaleIntercept if hasattr(DCM_Img, 'RescaleIntercept') else 0.0
+		
+		scaled_image = image_data * slope + intercept
+		if Show:
+			OpenCV.imshow("Image", scaled_image)
+			OpenCV.waitKey(0)
 
-	# Shuffle data and labels together for balanced split
-	combined = list(zip(data, labels))
-	random.shuffle(combined)
-	data, labels = zip(*combined)
-	print(f"Data before splitting: {len(data)}")
-	print(f"Labels before splitting: {len(labels)}")
-
-	X_train = data[:test_index]
-	X_test = data[test_index:]
-	y_train = labels[:test_index]
-	y_test = labels[test_index:]
-
-	return X_train, X_test, y_train, y_test
-
+		return OpenCV.Mat(scaled_image)
+	
+	except Exception as E:
+		print(f"An error occurred while converting DICOM to Numpy {E.__cause__}")
+		raise ValueError("An error occurred while converting DICOM to Numpy")
+	
 def LoadImage(Location: str, Show:bool = False) -> OpenCV.Mat:
 	"""
 	AUTHOR: 	Ahmed Abdullah
@@ -187,8 +108,6 @@ def LoadImage(Location: str, Show:bool = False) -> OpenCV.Mat:
 
 	return Image
 
-# MARK: Image Proc Funcs
-
 def ImageProcessingStack(image: OpenCV.Mat) -> None:
 	"""
 	AUTHOR: 	Muhammad Aoun Abdullah
@@ -203,10 +122,12 @@ def ImageProcessingStack(image: OpenCV.Mat) -> None:
 	OpenCV.normalize(image, image, HistogramAlphaScaling)
 	image = OpenCV.GaussianBlur(image, GaussianKernel, GaussianSigma)
 
-# MARK: 
+def PlotConfusion(real, expected) -> None:
+	cm = confusion_matrix(real, expected)
+	ConfusionMatrixDisplay(cm).plot()
 
-# MARK: Neural Net Classes
-# Heavily inspired by the guide published by PyTorch (https://pytorch.org/tutorials/beginner/data_loading_tutorial.html)
+
+# MARK: User-Defined Classes
 class CTScanDataset(Dataset):
 	"""
 	AUTHOR: 	Hamza Bin Aamir
@@ -291,7 +212,7 @@ class CTScanDataset(Dataset):
 		RetData["images"] = ImageSet
 
 		return RetData
-
+	
 class TemporalVGG16(NeuralNet.Module):
 	"""
 		AUTHOR: 	Hamza Bin Aamir, Ahmed Abdullah, Muhammad Aoun Abdullah, Azeem Liaqat
@@ -384,100 +305,77 @@ class TemporalVGG16(NeuralNet.Module):
 		x = self.fc(x)
 		return x
 
-# MARK: Entry Point
-if __name__ == "__main__":
-	# Load the dataset
-	diagnoses, patients = LoadPatientAndDiagnosis(DatasetLoc, NumPatients) 
-	print("******************** Dataset loaded successfully ********************")
-	print(f"Patient Image Locations: \n{Pandas.Series(patients)} Patients: {len(patients)}")
-	print(f"Diagnoses: \n{diagnoses} Patients: {len(diagnoses)}")
+# MARK: UD Funcs Cont.
+def LoadModel(Location:str):
+	# Get the script directory (where your script is located)
+	script_dir = os.path.dirname(__file__)
 
-	# Split the dataset into training and testing sets
-	X_train, X_test, y_train, y_test = train_test_split(patients, diagnoses, Train_Ratio)
-	print("******************** Dataset split successfully ********************")
-	print(f"X_train: {len(X_train)} \nX_test: {len(X_test)} \ny_train: {len(y_train)} \ny_test: {len(y_test)}")
+	# Join the script directory with the relative location provided
+	model_path = os.path.join(script_dir, Location)
+	try:
+		model = TemporalVGG16()
+		state_dict = PyTorch.load(model_path)
+		model.load_state_dict(state_dict)
+		return model
+	except FileNotFoundError:
+		print(f"Error: Model file not found at {Location}")
+	except RuntimeError as e:
+		print(f"Error loading model: {e}")
+	raise FileNotFoundError()
 
-	# Create the dataset
-	train_dataset = CTScanDataset(y_train, X_train)
-	test_dataset = CTScanDataset(y_test, X_test)
-	print("******************** Dataset converted to PyTorch compatible successfully ********************")
-	print("Length of Train Dataset:", len(train_dataset))
-	print("Length of Test Dataset:", len(test_dataset))
+def LoadDiagnoses(Location:str, Queries:list[str]) -> Pandas.Series:
+	# Get the script directory (where your script is located)
+	script_dir 		= os.path.dirname(__file__)
 
-	# Create the dataloaders
-	train_loader = 	PyTorch.utils.data.DataLoader(train_dataset, batch_size=1, shuffle=True)
-	test_loader = 	PyTorch.utils.data.DataLoader(test_dataset,	 batch_size=1, shuffle=False)
+	# Join the script directory with the relative location provided
+	diagnoses_path 	= os.path.join(script_dir, Location)
+	diagnoses_file	= Pandas.read_excel(diagnoses_path)
+	PateintsCol		= "ID"
+	DiagnosesCol	= "Diagnosis"	
+	Responses 		= []
 
-	# Create the model
-	model = TemporalVGG16()
-	print("******************** Model created successfully ********************")
-	print("Model Type:", model._get_name())
-
-	# Define the loss function and optimizer
-	criterion = NeuralNet.L1Loss()
-	optimizer = Optimiser.Adam(model.parameters(), lr=0.01)
-	print("******************** Unsupervised Learning Trainer Created ********************")
-	print(f"Criterea:{criterion} (AKA Mean Absolute Error) \nOptimizer: {optimizer} \nEpochs: {Epochs} \nBatch Size: 1 \nShuffle: True")
-
-	# Training loop
-	curr_index = 0
-	epoch_losses = []
-	epoch_indices = []
-	test_losses = []
-
-	for epoch in range(Epochs):
-		print(f"Epoch Number: {curr_index}")
-		curr_index += 1
-		epoch_loss = 0.0
+	for query in Queries:
+		MatchedDataframe = diagnoses_file.loc[diagnoses_file[PateintsCol] == query]
+		matched_values = MatchedDataframe[DiagnosesCol] 
+		try:
+			Responses.append(matched_values.iloc[0])
+		except:
+			Responses.append(0)
 
 
-		for batch in train_loader:
-			# Get the inputs and labels from the batch
-			inputs, labels = batch['images'], batch['diagnosis']
+	return Responses
 
-			# Zero the gradients
-			optimizer.zero_grad()
-			
-			# Forward pass
-			outputs = model(inputs)
-			
-			# Compute the loss
-			loss = criterion(outputs, labels)
-			
-			# Backward pass
-			loss.backward()
-			
-			# Update the weights
-			optimizer.step()
+def getSubDirs(Location:str):
+	return [d for d in os.listdir(os.path.join(os.path.dirname(__file__), Location)) if os.path.isdir(os.path.join(os.path.join(os.path.dirname(__file__), Location), d))]
 
-			epoch_loss += outputs.shape[0] * loss.item()
-		epoch_losses.append(epoch_loss / len(train_dataset))
-		epoch_indices.append(curr_index)
+def getSubFiles(Location: str, ext: str):
+	Subdirs = getSubDirs(Location)
+	Subsubdirs = []
+	final_dirs = []
+	image_locs = []
+	for Subsubdir in Subdirs:
+		Subsubdirs.append(getSubDirs(Location + "\\" + Subsubdir))
+	for Subsubsubdir in os.listdir(os.path.join(os.path.dirname(__file__), os.path.join(Location, Subsubdir))):
+		final_dirs.append(getSubDirs(Location + "\\" + Subsubdir + "\\" + Subsubsubdir))
+	for image_location in os.listdir(os.path.join(os.path.dirname(__file__), os.path.join(Location, os.path.join(Subsubdir, Subsubsubdir)))):
+		if(image_location.endswith(".dcm")):
+			image_locs.append(os.path.join(os.path.dirname(__file__), os.path.join(Location, os.path.join(Subsubdir, os.path.join(Subsubsubdir, image_location)))))
 
-		test_loss = 0.0
-		for batch in test_loader:
-			inputs, labels = batch['images'], batch['diagnosis']
+	return image_locs
 
-			outputs = model(inputs)
 
-			loss = criterion(outputs, labels)
-			test_loss += outputs.shape[0] * loss.item()
-		test_losses.append(test_loss / len(test_dataset))
-	print("******************** Model Training Completed ********************")
+def convert_outputs_to_labels(outputs, threshold:float=1):
+	"""
+	Converts model outputs to predicted labels for binary classification with a threshold.
 
-	if Save_Model:
-		now = datetime.datetime.now()
-		PyTorch.save(model.state_dict(), f"{now.strftime("%Y%m%d %H%M%S")}.pt")
-		print("******************** Model Saved ********************")
+	Args:
+		outputs: A tensor of model outputs with shape (batch_size,).
+		threshold: The threshold value for classifying outputs as 0 or 1 (default: 0.5).
 
-	epoch_losses 	= [100 - element for element in epoch_losses]
-	test_losses 	= [100 - element for element in test_losses]
-	PyPlot.title("Model Accuracy in Training and Testing")
-	PyPlot.plot(epoch_indices, epoch_losses, marker='x', color='red', linestyle='--')
-	PyPlot.plot(epoch_indices, test_losses, marker='x', color='blue', linestyle='-')
-	PyPlot.xlabel("Epoch")
-	PyPlot.ylabel("Accuracy")
-	PyPlot.legend(['Training Accuracy (%)', 'Testing Accuracy (%)'])
-	PyPlot.grid(True)
-	PyPlot.show()
+	Returns:
+		A list of predicted labels (integers) for each sample in the batch.
+	"""
 
+	# Apply threshold to get binary labels (0 or 1)
+	predicted_labels = (outputs > threshold).float().tolist()  # Convert to float for list conversion
+	return predicted_labels
